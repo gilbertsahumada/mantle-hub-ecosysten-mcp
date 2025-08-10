@@ -1,8 +1,8 @@
 # DAAT Project - Documentation RAG System
 
-Un sistema RAG (Retrieval-Augmented Generation) para indexar documentaciones de proyectos y exponerlas através de un servidor MCP (Model Context Protocol).
+A RAG (Retrieval-Augmented Generation) system for indexing project documentation with a GitHub-like social platform for the developer community.
 
-## 🏗️ Arquitectura General
+## 🏗️ General Architecture
 
 ```mermaid
 graph TB
@@ -15,23 +15,25 @@ graph TB
     subgraph "Processing Pipeline"
         EXTRACT[🔍 Document Extractor]
         CHUNK[✂️ Text Chunker]
-        EMBED[🧠 Embedding Service]
+        EMBED[🧠 OpenAI Embeddings]
     end
 
     subgraph "Storage Layer"
         QDRANT[(🗄️ Qdrant Vector DB)]
-        META[📊 Metadata Store]
+        SUPABASE[(🐘 Supabase PostgreSQL)]
     end
 
-    subgraph "Query Interface"
-        MCP[🔌 MCP Server]
-        SEARCH[🔎 Semantic Search]
-        UI[🖥️ Next.js UI]
+    subgraph "Application Layer"
+        API[🔌 Next.js API Routes]
+        SERVICE[⚡ Business Logic Layer]
+        UI[🖥️ Next.js 15 UI]
     end
 
-    subgraph "AI Clients"
-        CLAUDE[🤖 Claude Code]
-        OTHER[🔧 Other MCP Clients]
+    subgraph "Social Features"
+        COMMENTS[💬 Comments System]
+        STARS[⭐ GitHub-like Stars]
+        REACTIONS[👍 Reactions]
+        USERS[👤 User Management]
     end
 
     GIT --> EXTRACT
@@ -41,263 +43,368 @@ graph TB
     EXTRACT --> CHUNK
     CHUNK --> EMBED
     EMBED --> QDRANT
-    EXTRACT --> META
+    EXTRACT --> SUPABASE
     
-    QDRANT --> SEARCH
-    META --> SEARCH
-    SEARCH --> MCP
-    SEARCH --> UI
+    QDRANT --> SERVICE
+    SUPABASE --> SERVICE
+    SERVICE --> API
+    API --> UI
     
-    MCP --> CLAUDE
-    MCP --> OTHER
+    USERS --> COMMENTS
+    USERS --> STARS
+    USERS --> REACTIONS
+    COMMENTS --> SUPABASE
+    STARS --> SUPABASE
+    REACTIONS --> SUPABASE
 ```
 
-## 🎯 Componentes del Sistema
+## 🎯 Tech Stack
 
-### 1. Next.js Frontend (Puerto 3000)
-- **Función**: Interfaz web para gestionar proyectos y ver documentación indexada
-- **Responsabilidades**:
-  - CRUD de proyectos
-  - Visualización de estado de indexación
-  - Búsqueda y preview de documentos
-  - Dashboard de métricas
+### Frontend
+- **Next.js 15** - React framework with App Router
+- **TypeScript** - Static typing
+- **Tailwind CSS** - Utility-first styling
+- **shadcn/ui** - Modern UI components
+- **Lucide React** - Icon library
 
-### 2. Servidor MCP (Puerto 8000)
-- **Función**: Servidor standalone que expone la funcionalidad RAG via MCP
-- **Responsabilidades**:
-  - Recibir consultas de clientes MCP
-  - Ejecutar búsquedas semánticas en Qdrant
-  - Retornar documentación relevante
-  - Manejar contexto y conversaciones
+### Backend & Database
+- **Supabase PostgreSQL** - Relational database
+- **Drizzle ORM** - Type-safe ORM for PostgreSQL
+- **Qdrant** - Vector database for semantic search
+- **OpenAI API** - Embeddings generation (text-embedding-3-small, 1536D)
 
-### 3. Qdrant Vector Database
-- **Función**: Almacenamiento de vectores y búsqueda semántica
-- **Collections**:
-  - `daat`: Documentos vectorizados (embeddings 384D)
-  - `projects`: Metadata de proyectos (sin vectores)
+### Infrastructure
+- **Vercel** - Deployment and hosting
+- **Docker** - Containerization (Qdrant)
 
-### 4. Embedding Service
-- **Función**: Convertir texto a vectores numéricos
-- **Opciones**:
-  - **OpenAI API** (ada-002, text-embedding-3-small)
-  - **HuggingFace Transformers** (local)
-  - **Ollama** (local, modelos como nomic-embed-text)
+## 🗄️ Database Architecture
 
-## 🔄 Flujo de Datos
+### Relational Schema (Supabase)
 
-### Indexación de Documentos
 ```mermaid
-sequenceDiagram
-    participant UI as Next.js UI
-    participant API as Next.js API
-    participant QS as QdrantService
-    participant ES as EmbeddingService
-    participant QD as Qdrant DB
-
-    UI->>API: POST /api/projects (crear proyecto)
-    API->>QS: saveProject()
-    QS->>QD: Guardar metadata proyecto
+erDiagram
+    projects {
+        uuid id PK
+        text name
+        text description
+        text project_url
+        text twitter_url
+        text status
+        timestamp created_at
+        timestamp updated_at
+    }
     
-    UI->>API: POST /api/index (iniciar indexación)
-    API->>API: Clonar repositorio
-    API->>API: Extraer documentos (.md, .mdx, etc)
-    API->>API: Chunking de documentos
+    users {
+        uuid id PK
+        text email
+        text username
+        text avatar_url
+        timestamp created_at
+    }
     
-    loop Para cada chunk
-        API->>ES: generateEmbedding(chunk)
-        ES->>API: vector[384]
-        API->>QS: saveDocument(chunk, vector)
-        QS->>QD: Upsert vector + metadata
-    end
+    categories {
+        uuid id PK
+        text name
+        text slug
+        timestamp created_at
+    }
     
-    API->>UI: Estado: "completed"
+    documents {
+        uuid id PK
+        uuid project_id FK
+        text name
+        text description
+        text github_url
+        text file_path
+        text file_name
+        text qdrant_collection
+        integer chunks_count
+        timestamp indexed_at
+    }
+    
+    comments {
+        uuid id PK
+        uuid project_id FK
+        uuid user_id FK
+        text content
+        uuid parent_id FK
+        timestamp created_at
+    }
+    
+    reactions {
+        uuid id PK
+        uuid comment_id FK
+        uuid user_id FK
+        text type
+        timestamp created_at
+    }
+    
+    project_stars {
+        uuid id PK
+        uuid project_id FK
+        uuid user_id FK
+        timestamp starred_at
+    }
+    
+    project_categories {
+        uuid id PK
+        uuid project_id FK
+        uuid category_id FK
+    }
+
+    projects ||--o{ documents : "has many"
+    projects ||--o{ comments : "has many"
+    projects ||--o{ project_stars : "has many"
+    projects ||--o{ project_categories : "belongs to many"
+    categories ||--o{ project_categories : "belongs to many"
+    users ||--o{ comments : "creates"
+    users ||--o{ reactions : "creates"
+    users ||--o{ project_stars : "creates"
+    comments ||--o{ reactions : "receives"
+    comments ||--o{ comments : "has replies"
 ```
 
-### Consulta via MCP
-```mermaid
-sequenceDiagram
-    participant CLIENT as Claude Code
-    participant MCP as MCP Server
-    participant ES as EmbeddingService
-    participant QS as QdrantService
-    participant QD as Qdrant DB
+### Vector Schema (Qdrant)
 
-    CLIENT->>MCP: "¿Cómo usar hooks en React?"
-    MCP->>ES: generateEmbedding(query)
-    ES->>MCP: queryVector[384]
-    MCP->>QS: searchSimilar(queryVector)
-    QS->>QD: Vector similarity search
-    QD->>QS: Top 5 documentos relevantes
-    QS->>MCP: Documentos + scores
-    MCP->>CLIENT: Respuesta con contexto
-```
-
-## 📊 Estructura de Datos
-
-### Proyecto
-```typescript
-interface Project {
-    id: string;                    // UUID único
-    name: string;                  // "Next.js Documentation"
-    description?: string;          // Descripción opcional
-    url: string;                   // URL del repositorio
-    status: 'pending' | 'indexing' | 'completed' | 'error';
-    documentsCount: number;        // Cantidad de documentos indexados
-    createdAt: Date;
-    updatedAt: Date;
-    tags?: string[];               // ["react", "frontend", "ssr"]
-}
-```
-
-### Documento Extraído
-```typescript
-interface ExtratedDoc {
-    projectId: string;             // Referencia al proyecto
-    path: string;                  // "docs/getting-started.md"
-    title: string;                 // Título extraído del documento
-    content: string;               // Contenido del chunk
-    metadata?: Record<string, any>; // Headers, frontmatter, etc.
-    repoUrl: string;               // URL original del archivo
-    filType: string;               // "md", "mdx", "rst", etc.
-}
-```
-
-### Punto Vectorial en Qdrant
 ```json
 {
-    "id": "nextjs-docs-getting-started-chunk-1",
-    "vector": [0.1, -0.3, 0.8, ...], // 384 dimensiones
+    "collection": "project_<uuid>",
+    "vector": [0.1, -0.3, 0.8, ...], // 1536 dimensions
     "payload": {
-        "projectId": "uuid-proyecto",
-        "title": "Getting Started with Next.js",
-        "content": "Next.js is a React framework...",
-        "path": "docs/getting-started.md",
-        "chunkIndex": 1,
+        "project_id": "uuid-project",
+        "document_id": "uuid-document", 
+        "title": "Getting Started with React",
+        "content": "React is a JavaScript library...",
+        "file_path": "docs/getting-started.md",
+        "chunk_index": 1,
         "metadata": {
             "headers": ["h1", "h2"],
-            "wordCount": 150
+            "word_count": 150
         }
     }
 }
 ```
 
-## 🛠️ Opciones de Embedding Service
+## 🔄 Data Flow
 
-### 1. OpenAI API (Recomendado para producción)
-```bash
-# Variables de entorno
-OPENAI_API_KEY=sk-...
-EMBEDDING_MODEL=text-embedding-3-small  # 1536 dims
-# o
-EMBEDDING_MODEL=text-embedding-ada-002   # 1536 dims
+### 1. Document Indexing
+
+```mermaid
+sequenceDiagram
+    participant UI as Next.js UI
+    participant API as API Routes
+    participant SERVICE as ProjectService
+    participant QDRANT as QdrantService
+    participant OPENAI as OpenAI API
+    participant DB as Supabase
+
+    UI->>API: POST /api/projects
+    API->>SERVICE: createProject()
+    SERVICE->>DB: Insert project + categories
+    DB->>SERVICE: Project created
+    
+    UI->>API: POST /api/documents/index
+    API->>QDRANT: processMarkdownFile()
+    QDRANT->>QDRANT: Extract + chunk text
+    
+    loop For each chunk
+        QDRANT->>OPENAI: Generate embedding
+        OPENAI->>QDRANT: Vector[1536]
+        QDRANT->>QDRANT: Store vector + metadata
+    end
+    
+    QDRANT->>DB: Update chunks_count
+    API->>UI: Indexing completed
 ```
 
-**Pros**: Alta calidad, rápido, hosted
-**Contras**: Costo por uso, requiere internet
+### 2. Semantic Search
 
-### 2. HuggingFace Local (Recomendado para desarrollo)
-```bash
-npm install @huggingface/transformers
-# Modelo: sentence-transformers/all-MiniLM-L6-v2 (384 dims)
+```mermaid
+sequenceDiagram
+    participant USER as User
+    participant UI as Chat Interface
+    participant API as API Routes
+    participant QDRANT as QdrantService
+    participant OPENAI as OpenAI API
+
+    USER->>UI: "How to use React hooks?"
+    UI->>API: POST /api/search
+    API->>OPENAI: Generate query embedding
+    OPENAI->>API: Query vector[1536]
+    API->>QDRANT: searchDocuments(vector)
+    QDRANT->>QDRANT: Cosine similarity search
+    QDRANT->>API: Top 5 relevant chunks
+    API->>UI: Contextual response
+    UI->>USER: Answer with sources
 ```
 
-**Pros**: Gratuito, offline, privacidad
-**Contras**: Consume memoria, setup inicial
+## 🎨 UI/UX Features
 
-### 3. Ollama Local (Alternativa)
-```bash
-ollama pull nomic-embed-text  # 768 dims
+### Project Cards
+- **Optimized height**: `h-72` for better content visualization
+- **Flexible layout**: Adaptive content distribution
+- **Social stats**: GitHub-style stars and comments counter
+- **External links**: Buttons for Twitter/X and project URL
+- **Categories**: Category badges with visual limits
+- **Status indicators**: Visual project states
+
+### Social Features
+- **GitHub-style stars**: Favorites system for projects
+- **Comments system**: Nested comments with replies
+- **Reactions**: Like/dislike on comments
+- **User profiles**: Basic user management
+
+## 📊 Data Types
+
+### Project with Relations
+```typescript
+interface ProjectWithRelations extends Project {
+  categories: Category[];
+  documents: Document[];
+  documentsCount: number;
+  commentsCount: number;
+  starsCount: number;
+}
 ```
 
-**Pros**: Fácil setup, modelos optimizados
-**Contras**: Tamaño de modelo, dependencia externa
+### Business Services
+```typescript
+class ProjectService {
+  async getAllProjects(): Promise<ProjectWithRelations[]>
+  async getProjectById(id: string): Promise<ProjectWithRelations | null>
+  async getProjectsByCategory(slug: string): Promise<Project[]>
+}
+```
 
-## 🚀 Plan de Implementación
-
-### Fase 1: RAG Core ✅ (Parcialmente completado)
-- [x] Setup Qdrant collections
-- [x] Modelos de datos TypeScript
-- [x] QdrantService básico
-- [ ] Embedding service
-- [ ] Document extraction & chunking
-- [ ] Vector search functions
-
-### Fase 2: MCP Server
-- [ ] Servidor MCP standalone (Node.js)
-- [ ] Implementar protocolo MCP
-- [ ] Búsqueda semántica via MCP
-- [ ] Manejo de contexto y conversaciones
-
-### Fase 3: Next.js Frontend
-- [ ] UI para gestión de proyectos
-- [ ] Indexación via formularios
-- [ ] Visualización de documentos
-- [ ] Dashboard de métricas
-
-### Fase 4: Optimizaciones
-- [ ] Chunking inteligente (respetando markdown)
-- [ ] Filtros por proyecto/tags
-- [ ] Caché de embeddings
-- [ ] Métricas de relevancia
-
-## 🔧 Comandos de Desarrollo
+## 🛠️ Development Commands
 
 ```bash
-# Instalar dependencias
+# Install dependencies
 yarn install
 
-# Desarrollo Next.js
+# Next.js development
 yarn dev
 
-# Desarrollo MCP Server (cuando esté implementado)
-yarn mcp:dev
+# Database
+yarn db:generate    # Generate migrations
+yarn db:push        # Apply schema changes
+yarn db:seed        # Populate with initial data
 
-# Build completo
-yarn build
-
-# Linting
+# Linting and formatting
 yarn lint
+yarn typecheck
+
+# Production build
+yarn build
 ```
 
-## 🌟 Casos de Uso
-
-1. **Consulta Directa**: "¿Cómo configurar routing en Next.js?"
-2. **Comparación**: "Diferencias entre getServerSideProps y getStaticProps"
-3. **Debugging**: "Error hydration mismatch en Next.js"
-4. **Best Practices**: "Optimización de performance en React"
-
-## 📁 Estructura del Proyecto
+## 🗂️ Project Structure
 
 ```
 repo-docs-next/
-├── app/                    # Next.js App Router
-│   ├── api/               # API Routes para indexación
-│   └── page.tsx           # UI principal
+├── app/                          # Next.js App Router
+│   ├── api/                     # API Routes
+│   │   ├── chat/               # Chat functionality
+│   │   └── projects/           # Projects CRUD
+│   ├── projects/               # Projects pages
+│   └── globals.css             # Global styles
 ├── lib/
-│   ├── qdrant.ts          # ✅ QdrantService
-│   ├── embeddings.ts      # 🔄 Embedding service
-│   ├── chunker.ts         # 🔄 Document chunking
-│   └── extractor.ts       # 🔄 Git & file extraction
-├── mcp-server/            # 🔄 Servidor MCP standalone
-│   ├── index.ts           # Entry point MCP
-│   └── handlers.ts        # MCP request handlers
-├── types/
-│   └── index.ts           # ✅ Interfaces TypeScript
-└── components/            # ✅ UI Components (shadcn/ui)
+│   ├── db/                     # Database layer
+│   │   ├── schema.ts          # Drizzle schema
+│   │   └── index.ts           # DB connection
+│   ├── services/               # Business logic
+│   │   └── project.service.ts # Projects service
+│   ├── hooks/                  # React hooks
+│   │   └── useProjects.ts     # Projects data fetching
+│   ├── types/                  # TypeScript types
+│   ├── qdrant.ts              # Vector database service
+│   └── utils.ts               # Utilities
+├── components/                  # React components
+│   ├── ui/                    # shadcn/ui components
+│   ├── theme-provider.tsx     # Theme management
+│   └── theme-toggle.tsx       # Dark mode toggle
+├── scripts/
+│   └── seed.ts                # Database seeding
+└── drizzle/                   # Database migrations
 ```
 
-## 🔒 Consideraciones de Seguridad
+## 🌟 Use Cases
 
-- Variables de entorno para API keys
-- Validación de URLs de repositorios
-- Sanitización de contenido extraído
-- Rate limiting en APIs
-- Autenticación para MCP server (opcional)
+### For Developers
+1. **Centralized Documentation**: Unified access to docs from multiple projects
+2. **Semantic Search**: "How to implement authentication in Next.js?"
+3. **Comparisons**: Differences between frameworks or libraries
+4. **Community Feedback**: Project comments and ratings
+
+### For Project Maintainers
+1. **Visibility**: Project showcase with social metrics
+2. **Feedback Loop**: Direct community feedback
+3. **Analytics**: Usage and popularity metrics
+4. **Documentation as Code**: Automatic indexing from repositories
+
+## 🔧 Environment Configuration
+
+### Required Variables (.env.local)
+```bash
+# Database
+DATABASE_URL="postgresql://..."
+DIRECT_URL="postgresql://..."
+
+# OpenAI
+OPENAI_API_KEY="sk-..."
+
+# Qdrant
+QDRANT_URL="http://localhost:6333"
+
+# Next.js
+NEXT_PUBLIC_APP_URL="http://localhost:3000"
+```
+
+### External Services
+1. **Supabase**: Hosted PostgreSQL database
+2. **OpenAI**: High-quality embeddings API
+3. **Qdrant Cloud** or **Local Docker**: Vector database
+
+## 🚀 Roadmap
+
+### ✅ Phase 1: Core Infrastructure (Completed)
+- [x] Next.js 15 + TypeScript setup
+- [x] Supabase + Drizzle ORM integration
+- [x] Complete relational schema
+- [x] QdrantService with OpenAI embeddings
+- [x] Base UI with shadcn/ui
+- [x] Projects and categories system
+
+### ✅ Phase 2: Social Features (Completed)
+- [x] Users, comments, reactions tables
+- [x] GitHub-style stars system
+- [x] Project cards with social stats
+- [x] External links (Twitter/X, project URL)
+- [x] Service layer with business logic
+
+### 🔄 Phase 3: In Development
+- [ ] Chat interface for RAG queries
+- [ ] MD document indexing from GitHub
+- [ ] Functional semantic search
+- [ ] Comments system frontend
+- [ ] User authentication
+
+### 📅 Phase 4: Future
+- [ ] MCP Server for Claude Code integration
+- [ ] Analytics dashboard
+- [ ] Public API for third parties
+- [ ] Mobile-responsive improvements
+- [ ] Advanced search filters
+
+## 🤝 Contributing
+
+This project is designed to be extensible and maintainable. Contributions are welcome following established conventions:
+
+- **Database**: Use Drizzle migrations for schema changes
+- **API**: RESTful endpoints under `/api`
+- **UI**: shadcn/ui components with Tailwind CSS
+- **Types**: Strict TypeScript throughout the application
 
 ---
 
-**¿Necesitas un servicio de embeddings?** 
-
-**SÍ, es obligatorio.** Sin embeddings no puedes hacer búsqueda semántica. Qdrant necesita vectores numéricos para calcular similitud coseno entre documentos y queries.
-
-**Recomendación**: Empieza con HuggingFace local para desarrollo, migra a OpenAI para producción.
+**Current Status**: Functional base system with social architecture. Next step: implement complete RAG with chat interface.
